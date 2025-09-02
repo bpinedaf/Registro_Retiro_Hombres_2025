@@ -32,7 +32,7 @@
 
     .card {
       width: 100%;
-      max-width: 420px;
+      max-width: 480px;
       margin: 18px auto;
       background: #fff;
       border-radius: 16px;
@@ -43,7 +43,7 @@
 
     #reader {
       width: 100%;
-      max-width: 360px;
+      max-width: 380px;
       margin: 0 auto 12px;
       border: 3px dashed #aaa;
       border-radius: 14px;
@@ -72,7 +72,7 @@
     .warn  { background-color: #fff3cd; color: #856404; }
 
     .actions { display: flex; gap: 10px; justify-content: center; margin-top: 12px; flex-wrap: wrap; }
-    button, input[type="text"] {
+    button, input[type="text"], select {
       font-family: inherit;
       border-radius: 10px;
       border: 1px solid #ddd;
@@ -93,7 +93,6 @@
 </head>
 <body>
   <header>
-    <!-- Reemplaza la imagen por tu logo -->
     <img src="logo_retiro.png" alt="Logo del Retiro">
     <h1>Control de Ingreso</h1>
     <p class="subtitulo">Retiro de Hombres – Comunidad Carretera Hacia Nuestro Salvador</p>
@@ -105,6 +104,7 @@
 
     <div class="actions">
       <button id="scan-again" class="secondary" style="display:none;">📷 Escanear otro</button>
+      <select id="camera-select" title="Seleccionar cámara" style="display:none;"></select>
     </div>
   </div>
 
@@ -121,14 +121,16 @@
   </footer>
 
   <script>
-    // ========= CONFIGURA AQUÍ: pega la URL de tu Web App de Apps Script =========
-    const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyT_hUFHYauZlkEvmz_nsb8mEAstUe5W5J-1kbAF9RtMAPAcu-g0Mx3CMMELELLAxk/exec"; 
+    // ========= CONFIGURA AQUÍ: URL del Web App (debe terminar en /exec) =========
+    const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyT_hUFHYauZlkEvmz_nsb8mEAstUe5W5J-1kbAF9RtMAPAcu-g0Mx3CMMELELLAxk/exec";
+
     // ------------------ Utilidades UI ------------------
     const readerDiv    = document.getElementById('reader');
     const resultDiv    = document.getElementById('result');
     const scanAgainBtn = document.getElementById('scan-again');
     const manualId     = document.getElementById('manual-id');
     const manualBtn    = document.getElementById('manual-check');
+    const cameraSelect = document.getElementById('camera-select');
 
     function setFrameState(stateClass) {
       readerDiv.classList.remove('frame-busy','frame-ok','frame-warn','frame-error');
@@ -139,14 +141,11 @@
       resultDiv.innerText = message;
       resultDiv.className = type;
       if (type === 'ok') {
-        setFrameState('frame-ok');
-        navigator.vibrate?.(80);
+        setFrameState('frame-ok'); navigator.vibrate?.(80);
       } else if (type === 'warn') {
-        setFrameState('frame-warn');
-        navigator.vibrate?.([120, 60, 120]);
+        setFrameState('frame-warn'); navigator.vibrate?.([120, 60, 120]);
       } else {
-        setFrameState('frame-error');
-        navigator.vibrate?.([60, 60, 60, 60, 200]);
+        setFrameState('frame-error'); navigator.vibrate?.([60, 60, 60, 60, 200]);
       }
     };
 
@@ -170,18 +169,45 @@
     let useStopRestartFallback = false;
     let lastText = null;
     let lastTime = 0;
+    let currentCameraId = null;
 
-    const cameraConfig = { facingMode: "environment" };
-    const scanConfig = { fps: 5, qrbox: { width: 300, height: 300 } };
+    // qrbox dinámico (entre 260 y 340 px según ancho)
+    function computeQrbox() {
+      const w = Math.min(readerDiv.clientWidth || 360, 380);
+      const size = Math.max(260, Math.min(340, Math.floor(w * 0.8)));
+      return { width: size, height: size };
+    }
 
-//    const scanConfig   = { fps: 10, qrbox: 250 };
+    const scanConfig = () => ({ fps: 5, qrbox: computeQrbox() });
+
+    async function populateCameras() {
+      try {
+        const cams = await Html5Qrcode.getCameras();
+        if (!cams || cams.length === 0) {
+          showResult("❌ No se encontraron cámaras. Revisa permisos o usa HTTPS.", 'error');
+          return;
+        }
+        cameraSelect.innerHTML = '';
+        cams.forEach((c, i) => {
+          const opt = document.createElement('option');
+          opt.value = c.id; opt.textContent = c.label || `Cámara ${i+1}`;
+          cameraSelect.appendChild(opt);
+        });
+        cameraSelect.style.display = cams.length > 1 ? 'inline-block' : 'none';
+        currentCameraId = cams.find(c => /back|rear|environment/i.test(c.label))?.id || cams[0].id;
+        cameraSelect.value = currentCameraId;
+      } catch (err) {
+        showResult("❌ No se pudo listar cámaras. Concede permisos al navegador.", 'error');
+      }
+    }
 
     async function startScanner() {
       if (!scanner) scanner = new Html5Qrcode("reader");
       locked = false;
       setFrameState(null);
       try {
-        await scanner.start(cameraConfig, scanConfig, onScanSuccess, onScanError);
+        const camId = currentCameraId ? { deviceId: { exact: currentCameraId } } : { facingMode: "environment" };
+        await scanner.start(camId, scanConfig(), onScanSuccess, onScanError);
       } catch (err) {
         showResult("❌ No se pudo iniciar la cámara. Revisa permisos del navegador.", 'error');
       }
@@ -224,7 +250,7 @@
     async function onScanSuccess(decodedText) {
       const now = Date.now();
       if (locked) return;
-      if (decodedText === lastText && (now - lastTime) < 1200) return; // anti dupe
+      if (decodedText === lastText && (now - lastTime) < 1200) return; // anti-dupe
       lastText = decodedText; lastTime = now;
 
       locked = true;
@@ -238,17 +264,34 @@
 
     function onScanError(_msg) { /* silencioso */ }
 
+    // ----- fetch con timeout + diagnóstico -----
     async function handleCheck(id) {
       const url = `${WEB_APP_URL}?id=${encodeURIComponent(id)}`;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 6500); // 6.5s
+
       try {
-        const response = await fetch(url, { method: 'GET' });
+        const response = await fetch(url, { method: 'GET', cache: 'no-store', signal: controller.signal });
         const text = await response.text();
 
+        // Diagnóstico si el servidor respondió error o redirección
+        if (!response.ok) {
+          showResult(`❌ Servidor ${response.status}: ${text.slice(0,120)}...`, 'error');
+          console.error('Detalle servidor', response.status, text);
+          return;
+        }
         if (text.includes("✅"))      showResult(text, 'ok');
         else if (text.includes("⚠️")) showResult(text, 'warn');
         else                          showResult(text, 'error');
+
       } catch (e) {
-        showResult("❌ Error al contactar al servidor.", 'error');
+        const msg = e.name === 'AbortError'
+          ? "❌ Tiempo de espera agotado. Revisa conexión."
+          : "❌ Error de red. Verifica permisos del Web App (/exec) y que no redirija a login.";
+        showResult(msg, 'error');
+        console.error(e);
+      } finally {
+        clearTimeout(timer);
       }
     }
 
@@ -263,11 +306,28 @@
     manualId.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') manualBtn.click();
     });
+    cameraSelect.addEventListener('change', async (e) => {
+      currentCameraId = e.target.value;
+      await pauseScanner();
+      await startScanner();
+    });
 
     // Arranque
-    startScanner();
+    (async () => {
+      // Aviso si no es HTTPS (necesario para cámaras en móviles)
+      if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+        showResult("⚠️ Usa HTTPS para acceso a cámara en móviles.", 'warn');
+      }
+      await populateCameras();
+      await startScanner();
+      // Recalcular qrbox en resize (por si cambias orientación)
+      window.addEventListener('resize', async () => {
+        if (!scanner) return;
+        // Reiniciar para aplicar nuevo qrbox
+        try { await pauseScanner(); } catch {}
+        await startScanner();
+      });
+    })();
   </script>
 </body>
 </html>
-
-
