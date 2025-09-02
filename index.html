@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Control de Ingreso – Retiro de Hombres</title>
+  <link rel="icon" type="image/ico" href="logo_retiro.ico" />
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --brand: #2d6cdf;
+      --ok: #28a745;
+      --warn: #ffc107;
+      --err: #dc3545;
+      --bg: #f6f7fb;
+      --ink: #333;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Nunito', sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      margin: 0;
+      padding: 24px 16px 60px;
+      text-align: center;
+    }
+    header { margin-bottom: 24px; }
+    header img { width: 120px; height: auto; margin-bottom: 10px; }
+    h1 { font-size: 1.8rem; margin: 0 0 6px; color: #444; }
+    .subtitulo { margin: 0; color: #666; }
+
+    .card {
+      width: 100%;
+      max-width: 420px;
+      margin: 18px auto;
+      background: #fff;
+      border-radius: 16px;
+      padding: 16px;
+      border: 1px solid #eee;
+      box-shadow: 0 4px 18px rgba(0,0,0,0.06);
+    }
+
+    #reader {
+      width: 100%;
+      max-width: 360px;
+      margin: 0 auto 12px;
+      border: 3px dashed #aaa;
+      border-radius: 14px;
+      background: #fff;
+      padding: 10px;
+      transition: border-color 160ms ease, box-shadow 160ms ease;
+      box-shadow: 0 0 0 0 rgba(0,0,0,0);
+    }
+    .frame-busy  { border-color: var(--brand); box-shadow: 0 0 0 4px rgba(45,108,223,0.15); }
+    .frame-ok    { border-color: var(--ok);    box-shadow: 0 0 0 4px rgba(40,167,69,0.15); }
+    .frame-warn  { border-color: var(--warn);  box-shadow: 0 0 0 4px rgba(255,193,7,0.2); }
+    .frame-error { border-color: var(--err);   box-shadow: 0 0 0 4px rgba(220,53,69,0.2); }
+
+    #result {
+      margin-top: 12px;
+      font-size: 1.05rem;
+      font-weight: 700;
+      padding: 14px;
+      border-radius: 10px;
+      display: inline-block;
+      max-width: 95%;
+      word-break: break-word;
+    }
+    .ok    { background-color: #d4edda; color: #155724; }
+    .error { background-color: #f8d7da; color: #721c24; }
+    .warn  { background-color: #fff3cd; color: #856404; }
+
+    .actions { display: flex; gap: 10px; justify-content: center; margin-top: 12px; flex-wrap: wrap; }
+    button, input[type="text"] {
+      font-family: inherit;
+      border-radius: 10px;
+      border: 1px solid #ddd;
+      padding: 10px 14px;
+      font-size: 1rem;
+    }
+    button {
+      background: var(--brand);
+      color: #fff;
+      border: none;
+      cursor: pointer;
+    }
+    button.secondary { background: #e9ecef; color: #222; }
+    button:active { transform: scale(0.98); }
+
+    footer { margin-top: 30px; font-size: 0.85rem; color: #999; }
+  </style>
+</head>
+<body>
+  <header>
+    <!-- Reemplaza la imagen por tu logo -->
+    <img src="logo_retiro.png" alt="Logo del Retiro">
+    <h1>Control de Ingreso</h1>
+    <p class="subtitulo">Retiro de Hombres – Comunidad Carretera Hacia Nuestro Salvador</p>
+  </header>
+
+  <div class="card">
+    <div id="reader" aria-live="polite"></div>
+    <div id="result" aria-live="assertive"></div>
+
+    <div class="actions">
+      <button id="scan-again" class="secondary" style="display:none;">📷 Escanear otro</button>
+    </div>
+  </div>
+
+  <div class="card" aria-label="Ingreso manual">
+    <p style="margin:0 0 8px;">¿QR dañado? Ingresa el <b>ID</b> manualmente:</p>
+    <div class="actions">
+      <input id="manual-id" type="text" placeholder="Pega o teclea el ID…" />
+      <button id="manual-check">Verificar</button>
+    </div>
+  </div>
+
+  <footer>
+    ♥ Desarrollado con cariño para la Comunidad Carretera Hacia Nuestro Salvador ♥
+  </footer>
+
+  <script>
+    // ========= CONFIGURA AQUÍ: pega la URL de tu Web App de Apps Script =========
+    const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyT_hUFHYauZlkEvmz_nsb8mEAstUe5W5J-1kbAF9RtMAPAcu-g0Mx3CMMELELLAxk/exec"; 
+    // ------------------ Utilidades UI ------------------
+    const readerDiv    = document.getElementById('reader');
+    const resultDiv    = document.getElementById('result');
+    const scanAgainBtn = document.getElementById('scan-again');
+    const manualId     = document.getElementById('manual-id');
+    const manualBtn    = document.getElementById('manual-check');
+
+    function setFrameState(stateClass) {
+      readerDiv.classList.remove('frame-busy','frame-ok','frame-warn','frame-error');
+      if (stateClass) readerDiv.classList.add(stateClass);
+    }
+
+    const showResult = (message, type = 'ok') => {
+      resultDiv.innerText = message;
+      resultDiv.className = type;
+      if (type === 'ok') {
+        setFrameState('frame-ok');
+        navigator.vibrate?.(80);
+      } else if (type === 'warn') {
+        setFrameState('frame-warn');
+        navigator.vibrate?.([120, 60, 120]);
+      } else {
+        setFrameState('frame-error');
+        navigator.vibrate?.([60, 60, 60, 60, 200]);
+      }
+    };
+
+    function beep(duration = 120, frequency = 880, volume = 0.2) {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(ctx.destination);
+        gain.gain.value = volume;
+        osc.frequency.value = frequency;
+        osc.type = 'sine';
+        osc.start();
+        setTimeout(() => { osc.stop(); ctx.close(); }, duration);
+      } catch (e) {}
+    }
+
+    // ------------------ Lógica de escaneo ------------------
+    let scanner;
+    let locked = false;
+    let useStopRestartFallback = false;
+    let lastText = null;
+    let lastTime = 0;
+
+    const cameraConfig = { facingMode: "environment" };
+    const scanConfig   = { fps: 10, qrbox: 250 };
+
+    async function startScanner() {
+      if (!scanner) scanner = new Html5Qrcode("reader");
+      locked = false;
+      setFrameState(null);
+      try {
+        await scanner.start(cameraConfig, scanConfig, onScanSuccess, onScanError);
+      } catch (err) {
+        showResult("❌ No se pudo iniciar la cámara. Revisa permisos del navegador.", 'error');
+      }
+    }
+
+    async function pauseScanner() {
+      if (!scanner) return;
+      try {
+        if (typeof scanner.pause === 'function') {
+          scanner.pause(true);
+          useStopRestartFallback = false;
+        } else {
+          await scanner.stop();
+          useStopRestartFallback = true;
+        }
+      } catch (e) {
+        try { await scanner.stop(); useStopRestartFallback = true; } catch (_e) {}
+      }
+    }
+
+    async function resumeScanner() {
+      resultDiv.innerText = '';
+      resultDiv.className = '';
+      scanAgainBtn.style.display = 'none';
+      locked = false;
+      setFrameState(null);
+      try {
+        if (useStopRestartFallback) {
+          await startScanner();
+        } else if (typeof scanner.resume === 'function') {
+          await scanner.resume();
+        } else {
+          await startScanner();
+        }
+      } catch (e) {
+        showResult("❌ No se pudo reanudar la cámara.", 'error');
+      }
+    }
+
+    async function onScanSuccess(decodedText) {
+      const now = Date.now();
+      if (locked) return;
+      if (decodedText === lastText && (now - lastTime) < 1200) return; // anti dupe
+      lastText = decodedText; lastTime = now;
+
+      locked = true;
+      beep();
+      setFrameState('frame-busy');
+      await handleCheck(decodedText);
+      await pauseScanner();
+      scanAgainBtn.style.display = 'inline-block';
+      scanAgainBtn.focus();
+    }
+
+    function onScanError(_msg) { /* silencioso */ }
+
+    async function handleCheck(id) {
+      const url = `${WEB_APP_URL}?id=${encodeURIComponent(id)}`;
+      try {
+        const response = await fetch(url, { method: 'GET' });
+        const text = await response.text();
+
+        if (text.includes("✅"))      showResult(text, 'ok');
+        else if (text.includes("⚠️")) showResult(text, 'warn');
+        else                          showResult(text, 'error');
+      } catch (e) {
+        showResult("❌ Error al contactar al servidor.", 'error');
+      }
+    }
+
+    // Eventos UI
+    scanAgainBtn.addEventListener('click', resumeScanner);
+    manualBtn.addEventListener('click', async () => {
+      const id = manualId.value.trim();
+      if (!id) return;
+      setFrameState('frame-busy');
+      await handleCheck(id);
+    });
+    manualId.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') manualBtn.click();
+    });
+
+    // Arranque
+    startScanner();
+  </script>
+</body>
+</html>
