@@ -172,7 +172,9 @@
     let lastTime = 0;
 
     const cameraConfig = { facingMode: "environment" };
-    const scanConfig   = { fps: 10, qrbox: 250 };
+    const scanConfig = { fps: 5, qrbox: { width: 300, height: 300 } };
+
+//    const scanConfig   = { fps: 10, qrbox: 250 };
 
     async function startScanner() {
       if (!scanner) scanner = new Html5Qrcode("reader");
@@ -267,3 +269,4 @@
   </script>
 </body>
 </html>
+
